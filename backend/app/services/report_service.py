@@ -1,54 +1,49 @@
-    def _generate_pdf(self, html: str) -> bytes:
+    def _store_report(self, analysis_id: int, pdf_bytes: bytes) -> str:
         """
-        Convert rendered HTML into a PDF document using WeasyPrint.
+        Store generated PDF bytes to persistent storage using LocalFileStorage.
 
-        This method does not write the PDF to disk; it returns the PDF file as bytes.
+        The PDF will be stored under the "reports/" directory using a collision-safe
+        filename that includes the analysis_id, a timestamp and a short UUID suffix.
 
         Args:
-            html: Fully rendered HTML string produced by _render_html.
+            analysis_id: Identifier of the analysis the report belongs to.
+            pdf_bytes: PDF file content as bytes (non-empty).
 
         Returns:
-            PDF file content as bytes.
+            Relative storage path where the PDF was saved (e.g. "reports/report_123_20260803_104530_f3b2.pdf").
 
         Raises:
-            ValueError: If the provided HTML is empty or not a string.
-            RuntimeError: If PDF generation fails for any reason. The original
-                          exception will be logged for debugging.
+            RuntimeError: If validation fails or storage operation fails.
         """
-        logger.info("Starting PDF generation for analysis report")
-        # Validate input
-        if not isinstance(html, str):
-            logger.error("HTML content must be a string. Got %s", type(html))
-            raise ValueError("HTML content must be a string")
-        if not html.strip():
-            logger.error("Empty HTML content provided for PDF generation")
-            raise ValueError("Empty HTML content provided")
+        logger.info("Storing report PDF for analysis_id=%s", analysis_id)
+
+        # Validate inputs
+        if not isinstance(analysis_id, int) or analysis_id <= 0:
+            logger.error("Invalid analysis_id provided for report storage: %s", analysis_id)
+            raise RuntimeError("Invalid analysis_id provided for report storage")
+        if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) == 0:
+            logger.error("Empty PDF bytes provided for analysis_id=%s", analysis_id)
+            raise RuntimeError("Empty PDF bytes provided for storage")
 
         try:
             from time import perf_counter
-            from pathlib import Path
-            # WeasyPrint imports
-            from weasyprint import HTML
+            from datetime import datetime
+            from uuid import uuid4
 
             start = perf_counter()
 
-            # Base URL should point to the templates directory so relative resources resolve
-            template_dir = Path(__file__).resolve().parent.parent / "templates"
-            base_url = str(template_dir)
+            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            suffix = uuid4().hex[:6]
+            filename = f"report_{analysis_id}_{ts}_{suffix}.pdf"
 
-            # Create PDF in memory
-            html_doc = HTML(string=html, base_url=base_url)
-            pdf_bytes = html_doc.write_pdf(stylesheets=None)
+            # Use LocalFileStorage to save the file under 'reports' subpath
+            # The LocalFileStorage.save_file API used elsewhere returns (relative_path, size)
+            rel_path, size = self.storage.save_file(pdf_bytes, filename=filename, subpath="reports")
 
             duration = perf_counter() - start
-            size = len(pdf_bytes) if pdf_bytes is not None else 0
-            logger.info("PDF generation completed in %.2fs; size=%d bytes", duration, size)
+            logger.info("Stored report for analysis_id=%s to %s (size=%d bytes) in %.2fs", analysis_id, rel_path, size, duration)
 
-            if not pdf_bytes:
-                logger.error("WeasyPrint returned empty PDF bytes")
-                raise RuntimeError("PDF generation produced empty output")
-
-            return pdf_bytes
+            return rel_path
         except Exception as exc:
-            logger.exception("PDF generation failed: %s", exc)
-            raise RuntimeError(f"Failed to generate PDF: {exc}")
+            logger.exception("Failed to store report for analysis_id=%s: %s", analysis_id, exc)
+            raise RuntimeError(f"Failed to store report for analysis {analysis_id}: {exc}")
