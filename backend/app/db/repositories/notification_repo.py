@@ -3,19 +3,29 @@ from sqlalchemy.orm import Session
 from app.db.models.notification import Notification
 
 
-def list_notifications_for_user(db: Session, user_id: int, skip: int = 0, limit: int = 50) -> List[Notification]:
-    return db.query(Notification).filter(Notification.user_id == user_id).order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
-
-
 def create_notification(db: Session, notification_in: dict) -> Notification:
-    n = Notification(**notification_in)
+    n = Notification(
+        patient_id=notification_in["patient_id"],
+        title=notification_in["title"],
+        message=notification_in["message"],
+        type=notification_in.get("type", "info"),
+        priority=notification_in.get("priority", "normal"),
+    )
     db.add(n)
     db.commit()
     db.refresh(n)
     return n
 
 
-def mark_notification_read(db: Session, notification: Notification) -> Notification:
+def get_notifications_for_patient(db: Session, patient_id: int, limit: int = 50, offset: int = 0) -> List[Notification]:
+    return db.query(Notification).filter(Notification.patient_id == patient_id).order_by(Notification.created_at.desc()).limit(limit).offset(offset).all()
+
+
+def get_notification(db: Session, notification_id: int) -> Optional[Notification]:
+    return db.query(Notification).filter(Notification.id == notification_id).one_or_none()
+
+
+def mark_notification_as_read(db: Session, notification: Notification) -> Notification:
     notification.is_read = True
     db.add(notification)
     db.commit()
