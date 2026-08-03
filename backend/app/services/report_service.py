@@ -1,38 +1,54 @@
-    def _render_html(self, data: Dict[str, Any]) -> str:
+    def _generate_pdf(self, html: str) -> bytes:
         """
-        Render the report HTML using Jinja2 templates located in the project's templates directory.
+        Convert rendered HTML into a PDF document using WeasyPrint.
+
+        This method does not write the PDF to disk; it returns the PDF file as bytes.
 
         Args:
-            data: payload dictionary as returned by _collect_report_data
+            html: Fully rendered HTML string produced by _render_html.
 
         Returns:
-            Rendered HTML string ready for PDF generation.
+            PDF file content as bytes.
 
         Raises:
-            RuntimeError: if template rendering fails.
+            ValueError: If the provided HTML is empty or not a string.
+            RuntimeError: If PDF generation fails for any reason. The original
+                          exception will be logged for debugging.
         """
+        logger.info("Starting PDF generation for analysis report")
+        # Validate input
+        if not isinstance(html, str):
+            logger.error("HTML content must be a string. Got %s", type(html))
+            raise ValueError("HTML content must be a string")
+        if not html.strip():
+            logger.error("Empty HTML content provided for PDF generation")
+            raise ValueError("Empty HTML content provided")
+
         try:
+            from time import perf_counter
             from pathlib import Path
-            from jinja2 import Environment, FileSystemLoader, select_autoescape
+            # WeasyPrint imports
+            from weasyprint import HTML
 
-            # Determine templates directory (backend/app/templates)
+            start = perf_counter()
+
+            # Base URL should point to the templates directory so relative resources resolve
             template_dir = Path(__file__).resolve().parent.parent / "templates"
-            env = Environment(
-                loader=FileSystemLoader(str(template_dir)),
-                autoescape=select_autoescape(["html", "xml"]),
-            )
-            template = env.get_template("report.html.jinja")
+            base_url = str(template_dir)
 
-            # Provide a generation timestamp if not supplied
-            from datetime import datetime
-            context = {"generation_time": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"), "data_date": None}
+            # Create PDF in memory
+            html_doc = HTML(string=html, base_url=base_url)
+            pdf_bytes = html_doc.write_pdf(stylesheets=None)
 
-            # Merge the collected data payload into the context
-            # The template expects top-level keys: patient, study, image, analysis, media, stage_prediction, risk_analysis, existing_report
-            context.update(data)
+            duration = perf_counter() - start
+            size = len(pdf_bytes) if pdf_bytes is not None else 0
+            logger.info("PDF generation completed in %.2fs; size=%d bytes", duration, size)
 
-            html = template.render(**context)
-            return html
+            if not pdf_bytes:
+                logger.error("WeasyPrint returned empty PDF bytes")
+                raise RuntimeError("PDF generation produced empty output")
+
+            return pdf_bytes
         except Exception as exc:
-            logger.exception("Failed to render report HTML for analysis: %s", data.get("analysis", {}).get("id"))
-            raise RuntimeError(f"Report rendering failed: {exc}")
+            logger.exception("PDF generation failed: %s", exc)
+            raise RuntimeError(f"Failed to generate PDF: {exc}")
