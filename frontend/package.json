@@ -1,0 +1,37 @@
+{
+  "name": "major-project-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint ./src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.11.0",
+    "@emotion/styled": "^11.11.0",
+    "@mui/icons-material": "^5.14.0",
+    "@mui/material": "^5.14.0",
+    "axios": "^1.4.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-query": "^3.39.2",
+    "react-router-dom": "^6.14.1",
+    "recharts": "^2.6.2",
+    "three": "^0.156.0",
+    "@react-three/fiber": "^8.14.2",
+    "@react-three/drei": "^9.59.1",
+    "react-pdf": "^7.0.0",
+    "clsx": "^1.2.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.14",
+    "@types/react-dom": "^18.2.6",
+    "typescript": "^5.4.2",
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "eslint": "^8.46.0",
+    "eslint-plugin-react": "^7.33.3"
+  }
+}

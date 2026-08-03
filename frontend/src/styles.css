@@ -1,0 +1,7 @@
+/* global CSS reset for the app */
+:root{
+  --mui-palette-bg: #121212;
+}
+html,body,#root{height:100%;}
+body{margin:0;font-family: Roboto, Helvetica, Arial, sans-serif}
+img{max-width:100%;}
