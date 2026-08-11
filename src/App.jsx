@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import api from "./services/api.js";
 import {
   Eye,
   EyeOff,
@@ -16,10 +17,26 @@ import "./App.css";
 export default function App() {
   const [page, setPage] = useState("login");
   const [user, setUser] = useState(null);
-  const [tempLoginUser, setTempLoginUser] = useState(null);
+  const [tempToken, setTempToken] = useState(null);
   const [result, setResult] = useState(null);
 
-  const handleCreateAccount = (formData) => {
+  useEffect(() => {
+    // On mount, try to fetch current user if token present
+    (async () => {
+      try {
+        const me = await api.me();
+        if (me && me.id) {
+          setUser(me);
+          setPage("dashboard");
+        }
+      } catch (e) {
+        // not logged in
+        setUser(null);
+      }
+    })();
+  }, []);
+
+  const handleCreateAccount = async (formData) => {
     const { name, email, password, confirmPassword } = formData;
 
     if (!name || !email || !password || !confirmPassword) {
@@ -42,103 +59,124 @@ export default function App() {
       return;
     }
 
-    const newUser = {
-      name,
-      email,
-      password,
-      role: "Pathologist",
-    };
-
-    localStorage.setItem("cervivalUser", JSON.stringify(newUser));
-    alert("Account created successfully. Please login.");
-    setPage("login");
-  };
-
-  const handleLogin = (email, password) => {
-    const savedUser = JSON.parse(localStorage.getItem("cervivalUser"));
-
-    if (!savedUser) {
-      alert("No account found. Please create an account first.");
-      return;
-    }
-
-    if (email === savedUser.email && password === savedUser.password) {
-      setTempLoginUser(savedUser);
-      setPage("twofa");
-    } else {
-      alert("Invalid email or password.");
+    try {
+      await api.signup(name, email, password);
+      alert("Account created successfully. Please login.");
+      setPage("login");
+    } catch (err) {
+      alert("Signup failed: " + err.message);
     }
   };
 
-  const verify2FA = (otp) => {
-    if (otp === "123456") {
-      setUser(tempLoginUser);
-      setPage("dashboard");
-    } else {
-      alert("Invalid OTP. Use 123456 for demo.");
+  const handleLogin = async (email, password) => {
+    try {
+      const res = await api.login(email, password);
+      // backend returns temp_token and otp for demo
+      if (res && res.temp_token) {
+        setTempToken(res.temp_token);
+        // keep demo OTP visible in UI
+        setPage("twofa");
+      } else {
+        alert("Login failed: unexpected response from server.");
+      }
+    } catch (err) {
+      alert("Login failed: " + err.message);
     }
   };
 
-  const generatePrediction = (data) => {
-    let score = 0;
-
-    if (Number(data.age) > 40) score += 2;
-    if (data.hpv === "yes") score += 3;
-    if (data.smoking === "yes") score += 1;
-    if (data.symptoms === "yes") score += 2;
-    if (data.history === "yes") score += 2;
-    if (data.abnormalBleeding === "yes") score += 2;
-    if (data.previousScreening === "yes") score += 1;
-    
-    const maxScore = 13;
-    const riskPercentage = Math.round((score / maxScore) * 100);
-
-    let stage = "Normal / Low Risk";
-    let risk = "Low";
-    let advice = "Routine screening and regular follow-up recommended.";
-
-    if (score >= 3 && score <= 5) {
-      stage = "Possible Pre-Cancerous Changes";
-      risk = "Moderate";
-      advice = "Further Pap smear/HPV review and clinical monitoring advised.";
-    } else if (score >= 6 && score <= 8) {
-      stage = "Possible Early Stage Cervical Cancer";
-      risk = "High";
-      advice = "Detailed examination and specialist consultation recommended.";
-    } else if (score > 8) {
-      stage = "Possible Advanced Risk Condition";
-      risk = "Very High";
-      advice = "Immediate clinical investigation and oncologist review advised.";
+  const verify2FA = async (otp) => {
+    try {
+      const res = await api.verifyOtp(tempToken, otp);
+      if (res && res.access_token) {
+        // api.verifyOtp already saves token in localStorage
+        // fetch user info
+        const me = await api.me();
+        setUser(me);
+        setPage("dashboard");
+        setTempToken(null);
+      } else {
+        alert("OTP verification failed: unexpected response");
+      }
+    } catch (err) {
+      alert("OTP verification failed: " + err.message + " (Use 123456 for demo)");
     }
+  };
 
-    setResult({
-      score,
-      maxScore,
-      riskPercentage,
-      stage,
-      risk,
-      advice,
-      patientName: data.patientName || "Not Provided",
-      patientId: data.patientId || "Not Provided",
-      screeningType: data.screeningType || "Pap Smear",
-      age: data.age || "Not Provided",
-      riskBreakdown: {
-        age: Number(data.age) > 40 ? 2 : 0,
-        hpv: data.hpv === "yes" ? 3 : 0,
-        smoking: data.smoking === "yes" ? 1 : 0,
-        symptoms: data.symptoms === "yes" ? 2 : 0,
-        history: data.history === "yes" ? 2 : 0,
-        abnormalBleeding: data.abnormalBleeding === "yes" ? 2 : 0,
-        previousScreening: data.previousScreening === "yes" ? 1 : 0,
-  },
-});
+  const generatePrediction = async (data) => {
+    // Save patient -> case -> upload image -> predict
+    try {
+      // Create or ensure patient
+      const patientPayload = {
+        patient_identifier: data.patientId || `auto-${Date.now()}`,
+        name: data.patientName || "",
+        age: data.age ? Number(data.age) : null,
+        gender: null,
+      };
+      const patient = await api.createPatient(patientPayload);
 
-    setPage("result");
+      // Create case
+      const clinical = {
+        patientName: data.patientName,
+        patientId: data.patientId,
+        age: data.age,
+        screeningType: data.screeningType,
+        hpv: data.hpv,
+        smoking: data.smoking,
+        symptoms: data.symptoms,
+        history: data.history,
+        abnormalBleeding: data.abnormalBleeding,
+        previousScreening: data.previousScreening,
+      };
+
+      const casePayload = {
+        patient_id: patient.id,
+        created_by: user?.id || 0,
+        clinical_data: JSON.stringify(clinical),
+      };
+
+      const createdCase = await api.createCase(casePayload);
+
+      // Upload image if present
+      if (data.image) {
+        try {
+          await api.uploadImage(createdCase.id, data.image);
+        } catch (err) {
+          // inform user but continue to prediction
+          alert("Image upload failed: " + err.message);
+        }
+      }
+
+      // Run prediction on backend
+      const predictionRes = await api.predict(createdCase.id, clinical);
+      const prediction = predictionRes.prediction || predictionRes;
+
+      // Build result object compatible with existing Result UI
+      const finalResult = {
+        score: prediction.score || prediction.score || 0,
+        maxScore: prediction.maxScore || prediction.maxScore || 13,
+        riskPercentage: prediction.riskPercentage || 0,
+        stage: prediction.stage || "",
+        risk: prediction.risk || "",
+        advice: prediction.advice || "",
+        patientName: clinical.patientName || "Not Provided",
+        patientId: clinical.patientId || "Not Provided",
+        screeningType: clinical.screeningType || "Pap Smear",
+        age: clinical.age || "Not Provided",
+        riskBreakdown: prediction.riskBreakdown || {},
+        model_version: prediction.model_version || "demo-v1",
+      };
+
+      setResult(finalResult);
+      setPage("result");
+    } catch (err) {
+      alert("Prediction workflow failed: " + err.message);
+    }
   };
 
   const logout = () => {
+    api.logout();
     setUser(null);
-    setTempLoginUser(null);
+    setTempToken(null);
     setResult(null);
     setPage("login");
   };
@@ -735,94 +773,5 @@ function Result({ result, backToDashboard, newAssessment }) {
               This output is generated using weighted clinical parameters entered
               during patient screening.
             </p>
-          </section>
 
-          <section className="report-panel score-panel">
-            <h2>Risk Score Overview</h2>
-
-            <div className="score-circle">
-              <span>{result.riskPercentage || 0}%</span>
-              <p>Risk</p>
-            </div>
-
-            <div className="score-bar">
-              <div style={{ width: `${result.riskPercentage || 0}%` }}></div>
-            </div>
-
-            <p className="score-note">
-              Risk percentage is calculated as: obtained score divided by maximum
-              score multiplied by 100.
-            </p>
-          </section>
-
-          <section className="report-panel basis-panel">
-            <h2>Risk Calculation Basis</h2>
-
-            <div className="basis-list">
-              <p>
-                Age above 40 <b>{result.riskBreakdown?.age || 0} / 2</b>
-              </p>
-              <p>
-                HPV Positive <b>{result.riskBreakdown?.hpv || 0} / 3</b>
-              </p>
-              <p>
-                Smoking Habit <b>{result.riskBreakdown?.smoking || 0} / 1</b>
-              </p>
-              <p>
-                Symptoms Present <b>{result.riskBreakdown?.symptoms || 0} / 2</b>
-              </p>
-              <p>
-                Family / Medical History{" "}
-                <b>{result.riskBreakdown?.history || 0} / 2</b>
-              </p>
-              <p>
-                Abnormal Bleeding{" "}
-                <b>{result.riskBreakdown?.abnormalBleeding || 0} / 2</b>
-              </p>
-              <p>
-                Previous Screening Issue{" "}
-                <b>{result.riskBreakdown?.previousScreening || 0} / 1</b>
-              </p>
-            </div>
-          </section>
-
-          <section className="report-panel recommendation-panel">
-            <h2>Clinical Recommendation</h2>
-            <p>{result.advice}</p>
-
-            <div className="recommendation-list">
-              <span>Suggested next step</span>
-              <b>
-                {result.risk === "Low"
-                  ? "Routine screening follow-up"
-                  : result.risk === "Moderate"
-                  ? "Clinical review advised"
-                  : result.risk === "High"
-                  ? "Specialist consultation advised"
-                  : "Immediate medical investigation advised"}
-              </b>
-            </div>
-          </section>
-        </div>
-
-        <div className="disclaimer-card">
-          <b>Project Disclaimer</b>
-          <p>
-            This report is generated for academic project demonstration only. It
-            is not a substitute for certified medical diagnosis or treatment.
-          </p>
-        </div>
-
-        <div className="result-actions">
-          <button className="primary-btn" onClick={newAssessment}>
-            New Assessment
-          </button>
-
-          <button className="secondary-btn" onClick={backToDashboard}>
-            Back to Dashboard
-          </button>
-        </div>
-      </section>
-    </main>
-  );
-}
+           (truncated) }
